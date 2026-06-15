@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HLS Stream Player</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        body {
+            background-color: #0f172a; /* Slate 900 */
+            color: #f8fafc; /* Slate 50 */
+        }
+        .action-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 9999px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 10;
+        }
+        .action-indicator.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-900 text-slate-50 flex flex-col items-center justify-center p-2 sm:p-4 md:p-8">
+
+    <div class="w-full max-w-5xl bg-slate-800 rounded-xl sm:rounded-2xl shadow-2xl p-4 sm:p-6 md:p-8 border border-slate-700 flex flex-col">
+        <div class="mb-4 sm:mb-6">
+            <h1 class="text-xl sm:text-2xl md:text-3xl font-bold mb-1 sm:mb-2 text-blue-400">HLS Video Player</h1>
+            <p class="text-slate-400 text-xs sm:text-sm">Paste your .m3u8 streaming link below to play.</p>
+        </div>
+
+        <div class="flex flex-col lg:flex-row gap-3 sm:gap-4 mb-4 sm:mb-6">
+            <div class="relative w-full flex items-center">
+                <input 
+                    type="text" 
+                    id="stream-url" 
+                    class="w-full bg-slate-900 border border-slate-600 rounded-lg pl-3 sm:pl-4 pr-20 sm:pr-24 py-3 text-sm sm:text-base text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-slate-500 transition-colors"
+                    placeholder="https://example.com/stream.m3u8"
+                >
+                <div class="absolute right-1 sm:right-2 flex gap-0.5 sm:gap-1 bg-slate-900 rounded-md">
+                    <button id="clear-btn" class="p-1.5 sm:p-2 text-slate-400 hover:text-red-400 focus:outline-none transition-colors" title="Clear">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                    <button id="paste-btn" class="p-1.5 sm:p-2 text-slate-400 hover:text-blue-400 focus:outline-none transition-colors" title="Paste">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="flex gap-2 w-full lg:w-auto">
+                <button 
+                    id="load-btn"
+                    class="flex-1 lg:flex-none bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 sm:px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-800 whitespace-nowrap text-sm sm:text-base"
+                >
+                    Load Stream
+                </button>
+                <button 
+                    id="record-btn"
+                    class="hidden flex-1 lg:flex-none bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 sm:px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-slate-800 whitespace-nowrap text-sm sm:text-base"
+                >
+                    Record
+                </button>
+            </div>
+        </div>
+
+        <div id="error-message" class="hidden mb-4 p-3 sm:p-4 bg-red-900/50 border border-red-500 text-red-200 rounded-lg text-xs sm:text-sm">
+            <span class="font-semibold">Error:</span> <span id="error-text">Failed to load the stream. The link might be expired or invalid.</span>
+        </div>
+
+        <div class="relative w-full aspect-video bg-black rounded-lg sm:rounded-xl overflow-hidden shadow-inner border border-slate-700/50" id="video-container">
+            <video id="video-player" class="absolute inset-0 w-full h-full object-contain" playsinline controls preload="auto"></video>
+            <div id="action-indicator" class="action-indicator text-lg sm:text-2xl px-3 py-1 sm:px-6 sm:py-2"></div>
+            
+            <div id="loading-overlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center text-white z-20 hidden">
+                <svg class="animate-spin h-8 w-8 sm:h-10 sm:w-10 text-blue-500 mb-2 sm:mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <div class="text-lg sm:text-xl font-semibold">Loading <span id="loading-pct">0</span>%</div>
+            </div>
+        </div>
+        
+        <div class="mt-4 flex justify-between items-center text-xs text-slate-500">
+            <span>Powered by <a href="https://github.com/video-dev/hls.js/" target="_blank" class="text-blue-400 hover:underline">hls.js</a></span>
+            <span id="status-indicator">Status: Waiting</span>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const video = document.getElementById('video-player');
+            const videoContainer = document.getElementById('video-container');
+            const actionIndicator = document.getElementById('action-indicator');
+            const urlInput = document.getElementById('stream-url');
+            const loadBtn = document.getElementById('load-btn');
+            const recordBtn = document.getElementById('record-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            const pasteBtn = document.getElementById('paste-btn');
+            const errorContainer = document.getElementById('error-message');
+            const errorText = document.getElementById('error-text');
+            const statusIndicator = document.getElementById('status-indicator');
+            const loadingOverlay = document.getElementById('loading-overlay');
+            const loadingPct = document.getElementById('loading-pct');
+            
+            let hls = null;
+            let mediaRecorder;
+            let recordedChunks = [];
+            let isRecording = false;
+
+            // Load last used URL from local storage
+            const savedUrl = localStorage.getItem('lastHlsUrl');
+            if (savedUrl) {
+                urlInput.value = savedUrl;
+            } else {
+                urlInput.value = "Https://st-us-01.vidsonic.net/secure/385/tr4jnmca0f0i/master.m3u8?server_id=2&expires=1781476471&file_id=tr4jnmca0f0i&md5=3dc221bc5fd5928223a005f5605b84ed";
+            }
+
+            function updateStatus(status, isError = false) {
+                statusIndicator.textContent = `Status: ${status}`;
+                statusIndicator.className = isError ? 'text-red-400' : 'text-slate-500';
+            }
+
+            function updateLoadingProgress(percent) {
+                loadingPct.textContent = Math.round(percent);
+            }
+
+            function showLoading() {
+                loadingOverlay.classList.remove('hidden');
+                updateLoadingProgress(0);
+            }
+
+            function hideLoading() {
+                loadingOverlay.classList.add('hidden');
+            }
+
+            function loadStream(url) {
+                // Reset UI
+                errorContainer.classList.add('hidden');
+                updateStatus('Loading...');
+                showLoading();
+
+                // Basic validation
+                if (!url) {
+                    hideLoading();
+                    showError("Please enter a valid URL.");
+                    return;
+                }
+
+                // Save to local storage for next time
+                localStorage.setItem('lastHlsUrl', url);
+
+                // Check if HLS.js is supported in this browser
+                if (Hls.isSupported()) {
+                    if (hls) {
+                        hls.destroy(); // Clean up previous instance
+                    }
+                    
+                    hls = new Hls({
+                        debug: false,
+                        enableWorker: true
+                    });
+
+                    hls.loadSource(url);
+                    hls.attachMedia(video);
+
+                    hls.on(Hls.Events.MANIFEST_LOADING, function() { updateLoadingProgress(10); });
+                    hls.on(Hls.Events.MANIFEST_LOADED, function() { updateLoadingProgress(30); });
+
+                    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                        updateLoadingProgress(50);
+                        updateStatus('Ready');
+                        recordBtn.classList.remove('hidden');
+                        video.play().catch(e => {
+                            console.log("Autoplay blocked by browser policy.");
+                            updateStatus('Ready (Click Play)');
+                            hideLoading();
+                        });
+                    });
+
+                    hls.on(Hls.Events.FRAG_LOAD_PROGRESS, function(event, data) {
+                        if (data.stats && data.stats.total > 0) {
+                            const progress = 50 + ((data.stats.loaded / data.stats.total) * 45);
+                            updateLoadingProgress(progress);
+                        }
+                    });
+
+                    hls.on(Hls.Events.FRAG_BUFFERED, function() {
+                        updateLoadingProgress(100);
+                    });
+
+                    hls.on(Hls.Events.ERROR, function(event, data) {
+                        if (data.fatal) {
+                            hideLoading();
+                            switch (data.type) {
+                                case Hls.ErrorTypes.NETWORK_ERROR:
+                                    showError("Network Error. The link might be expired, blocked by CORS, or unreachable.");
+                                    hls.destroy();
+                                    break;
+                                case Hls.ErrorTypes.MEDIA_ERROR:
+                                    showError("Media Error. Trying to recover...");
+                                    hls.recoverMediaError();
+                                    break;
+                                default:
+                                    showError("Unrecoverable error occurred while trying to play the stream.");
+                                    hls.destroy();
+                                    break;
+                            }
+                        }
+                    });
+                } 
+                // Native HLS support (mostly Safari)
+                else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = url;
+                    video.addEventListener('loadedmetadata', function() {
+                        updateStatus('Ready');
+                        recordBtn.classList.remove('hidden');
+                        video.play().catch(e => {
+                            console.log("Autoplay blocked by browser policy.");
+                            updateStatus('Ready (Click Play)');
+                            hideLoading();
+                        });
+                    });
+                    video.addEventListener('error', function() {
+                        hideLoading();
+                        showError("Failed to load stream. The link might be expired or unsupported.");
+                    });
+                } else {
+                    hideLoading();
+                    showError("Your browser does not support HLS playback.");
+                }
+            }
+
+            video.addEventListener('playing', hideLoading);
+            video.addEventListener('waiting', showLoading);
+
+            function showError(msg) {
+                errorText.textContent = msg;
+                errorContainer.classList.remove('hidden');
+                updateStatus('Failed', true);
+            }
+
+            // --- Click Events & Auto Paste ---
+            
+            loadBtn.addEventListener('click', () => {
+                loadStream(urlInput.value.trim());
+            });
+
+            urlInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    loadStream(urlInput.value.trim());
+                }
+            });
+
+            // Auto-paste when clicking an empty input field
+            urlInput.addEventListener('click', async () => {
+                if (urlInput.value.trim() === '') {
+                    try {
+                        const text = await navigator.clipboard.readText();
+                        if (text && (text.startsWith('http://') || text.startsWith('https://'))) {
+                            urlInput.value = text;
+                        }
+                    } catch (err) {
+                        console.log("Auto-paste blocked by browser. User must paste manually.");
+                    }
+                }
+            });
+
+            clearBtn.addEventListener('click', () => {
+                urlInput.value = '';
+                urlInput.focus();
+            });
+
+            pasteBtn.addEventListener('click', async () => {
+                try {
+                    const text = await navigator.clipboard.readText();
+                    urlInput.value = text;
+                } catch (err) {
+                    showError("Cannot access clipboard. Please ensure you have granted permission or paste manually.");
+                }
+            });
+
+            // Recording Logic
+            recordBtn.addEventListener('click', () => {
+                if (!isRecording) {
+                    startRecording();
+                } else {
+                    stopRecording();
+                }
+            });
+
+            function startRecording() {
+                try {
+                    const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+                    if (!stream) throw new Error("Stream capture is not supported in this browser.");
+
+                    recordedChunks = [];
+                    mediaRecorder = new MediaRecorder(stream);
+
+                    mediaRecorder.ondataavailable = (e) => {
+                        if (e.data.size > 0) recordedChunks.push(e.data);
+                    };
+
+                    mediaRecorder.onstop = saveRecording;
+                    mediaRecorder.start();
+
+                    isRecording = true;
+                    recordBtn.textContent = 'Stop & Save';
+                    recordBtn.classList.replace('bg-red-600', 'bg-slate-600');
+                    recordBtn.classList.replace('hover:bg-red-700', 'hover:bg-slate-700');
+                    recordBtn.classList.add('animate-pulse');
+                    updateStatus('Recording...', false);
+                } catch (err) {
+                    showError("Cannot record: " + err.message + " (CORS restrictions might be blocking capture)");
+                }
+            }
+
+            function stopRecording() {
+                if (mediaRecorder && isRecording) {
+                    mediaRecorder.stop();
+                    isRecording = false;
+                    recordBtn.textContent = 'Record';
+                    recordBtn.classList.replace('bg-slate-600', 'bg-red-600');
+                    recordBtn.classList.replace('hover:bg-slate-700', 'hover:bg-red-700');
+                    recordBtn.classList.remove('animate-pulse');
+                    updateStatus('Ready', false);
+                }
+            }
+
+            function saveRecording() {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                document.body.appendChild(a);
+                a.style = 'display: none';
+                a.href = url;
+                a.download = 'stream-recording.webm';
+                a.click();
+                window.URL.revokeObjectURL(url);
+            }
+
+            // Swipe Gesture Logic
+            let touchStartX = 0;
+            let touchStartY = 0;
+            let initialVolume = 1;
+            let initialBrightness = 1;
+            let currentBrightness = 1; 
+            let isLeftHalf = false;
+            let isVerticalDrag = false;
+            let actionTimeout;
+
+            videoContainer.addEventListener('touchstart', (e) => {
+                touchStartX = e.changedTouches[0].screenX;
+                touchStartY = e.changedTouches[0].screenY;
+                
+                const rect = videoContainer.getBoundingClientRect();
+                const touchXRelative = e.changedTouches[0].clientX - rect.left;
+                isLeftHalf = touchXRelative < (rect.width / 2);
+                
+                initialVolume = video.volume;
+                initialBrightness = currentBrightness;
+                isVerticalDrag = false;
+            }, { passive: true });
+
+            videoContainer.addEventListener('touchmove', (e) => {
+                if (!e.changedTouches.length) return;
+                const currentX = e.changedTouches[0].screenX;
+                const currentY = e.changedTouches[0].screenY;
+                const diffX = currentX - touchStartX;
+                const diffY = currentY - touchStartY;
+
+                if (Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > 10) {
+                    e.preventDefault(); 
+                    isVerticalDrag = true;
+                    
+                    const change = -diffY / 200; 
+
+                    if (isLeftHalf) {
+                        currentBrightness = Math.max(0.2, Math.min(2.0, initialBrightness + change));
+                        video.style.filter = `brightness(${currentBrightness})`;
+                        showIndicator(`☀️ ${Math.round(currentBrightness * 100)}%`);
+                    } else {
+                        video.volume = Math.max(0.0, Math.min(1.0, initialVolume + change));
+                        showIndicator(`🔊 ${Math.round(video.volume * 100)}%`);
+                    }
+                }
+            }, { passive: false });
+
+            videoContainer.addEventListener('touchend', (e) => {
+                if (isVerticalDrag) {
+                    hideIndicatorDelay();
+                    return; 
+                }
+
+                const touchEndX = e.changedTouches[0].screenX;
+                const touchEndY = e.changedTouches[0].screenY;
+                handleSwipe(touchStartX, touchStartY, touchEndX, touchEndY);
+            }, { passive: true });
+
+            function showIndicator(text) {
+                actionIndicator.textContent = text;
+                actionIndicator.classList.add('show');
+                clearTimeout(actionTimeout);
+            }
+
+            function hideIndicatorDelay() {
+                clearTimeout(actionTimeout);
+                actionTimeout = setTimeout(() => {
+                    actionIndicator.classList.remove('show');
+                }, 800);
+            }
+
+            function handleSwipe(startX, startY, endX, endY) {
+                const diffX = endX - startX;
+                const diffY = endY - startY;
+                const SWIPE_THRESHOLD = 40; 
+
+                if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > SWIPE_THRESHOLD) {
+                    if (diffX > 0) {
+                        skipVideo(5); 
+                    } else {
+                        skipVideo(-5); 
+                    }
+                }
+            }
+
+            function skipVideo(seconds) {
+                if (!video.duration || isNaN(video.duration)) return;
+                
+                video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
+                
+                showIndicator(seconds > 0 ? '+5s' : '-5s');
+                hideIndicatorDelay();
+            }
+        });
+    </script>
+</body>
+</html>
